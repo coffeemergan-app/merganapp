@@ -1,0 +1,159 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // 1. GLOBAL DEFAULT DENY (Zero-Trust Security)
+    // =========================================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // 2. FUNGSI OTENTIKASI & HAK AKSES PERAN (8 AKUN MERGAN)
+    // =========================================================================
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Super Admin Holding & Email Utama
+    function isHoldingAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'coffeemergan@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasUserDoc() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function getUserRole() {
+      return hasUserDoc() ? getUserDoc().role : '';
+    }
+
+    function getUserBranch() {
+      return hasUserDoc() ? getUserDoc().branchId : '';
+    }
+
+    // Role: OWNER_HOLDING (Akses Penuh Seluruh Cabang: Sumbawa, Urip, Madiun)
+    function isHoldingOwner() {
+      return isHoldingAdmin() || (hasUserDoc() && getUserRole() == 'OWNER_HOLDING');
+    }
+
+    // Role: PURCHASE_HOLDING (Kelola Pengadaan & Kirim Restok)
+    function isPurchaseHolding() {
+      return isHoldingOwner() || (hasUserDoc() && getUserRole() == 'PURCHASE_HOLDING');
+    }
+
+    // Hak Akses Cabang: Sumbawa, Urip Sumoharjo, atau Madiun
+    function isBranchAuthorized(targetBranchId) {
+      return isHoldingOwner() ||
+        (hasUserDoc() && (getUserBranch() == 'all' || getUserBranch() == targetBranchId));
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 64;
+    }
+
+    // =========================================================================
+    // 3. KOLEKSI USERS (8 Akun: Holding, Cabang Sumbawa, Urip, Madiun)
+    // =========================================================================
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isHoldingOwner();
+    }
+
+    // =========================================================================
+    // 4. KOLEKSI MASTER BAHAN BAKU (Katalog Pusat Purchase Holding)
+    // =========================================================================
+    match /masterBahanBaku/{itemId} {
+      // Seluruh akun cabang & kasir dapat melihat katalog bahan baku
+      allow read: if isSignedIn();
+
+      // Hanya Purchase Holding & Owner Holding yang dapat menambah/merubah harga bahan
+      allow write: if isPurchaseHolding();
+    }
+
+    // =========================================================================
+    // 5. KOLEKSI SHIFTS (Rekap Kasir Harian Shift 1 & Shift 2)
+    // =========================================================================
+    match /shifts/{shiftId} {
+      // Cabang hanya bisa melihat rekap cabangnya sendiri, Holding bisa melihat semua
+      allow read: if isSignedIn() && (
+        isHoldingOwner() ||
+        isBranchAuthorized(resource.data.branchId)
+      );
+
+      // Kepala Toko menginput rekap kasir sesuai cabangnya
+      allow create: if isSignedIn() && isValidId(shiftId) &&
+        isBranchAuthorized(request.resource.data.branchId) &&
+        request.resource.data.cash >= 0 &&
+        request.resource.data.qris >= 0;
+
+      // Edit diperbolehkan jika belum ditutup periode
+      allow update: if isSignedIn() && (
+        isHoldingOwner() ||
+        (isBranchAuthorized(resource.data.branchId) && request.resource.data.branchId == resource.data.branchId)
+      );
+
+      // Hapus hanya oleh Owner Holding
+      allow delete: if isHoldingOwner();
+    }
+
+    // =========================================================================
+    // 6. KOLEKSI EXPENSES (Belanja Operasional & Bahan Baku Harian)
+    // =========================================================================
+    match /expenses/{expenseId} {
+      allow read: if isSignedIn() && (
+        isHoldingOwner() ||
+        isBranchAuthorized(resource.data.branchId)
+      );
+
+      // Input belanja harian oleh Kepala Toko / Purchase Cabang
+      allow create: if isSignedIn() && isValidId(expenseId) &&
+        isBranchAuthorized(request.resource.data.branchId) &&
+        request.resource.data.hargaSatuan >= 0 &&
+        request.resource.data.kuantitas > 0;
+
+      allow update: if isSignedIn() && (
+        isHoldingOwner() ||
+        (isBranchAuthorized(resource.data.branchId) && request.resource.data.branchId == resource.data.branchId)
+      );
+
+      allow delete: if isHoldingOwner() || isPurchaseHolding();
+    }
+
+    // =========================================================================
+    // 7. KOLEKSI ORDERS (Permintaan Restok Bahan Cabang -> Purchase Holding)
+    // =========================================================================
+    match /orders/{orderId} {
+      allow read: if isSignedIn() && (
+        isPurchaseHolding() ||
+        isBranchAuthorized(resource.data.branchId)
+      );
+
+      // Cabang membuat permohonan restok barang
+      allow create: if isSignedIn() && isValidId(orderId) &&
+        isBranchAuthorized(request.resource.data.branchId) &&
+        request.resource.data.status in ['MENUNGGU KONFIRMASI', 'DIPROSES PURCHASE', 'SELESAI / TERKIRIM'];
+
+      // Purchase Holding memproses & mengubah status pengiriman
+      allow update: if isSignedIn() && (
+        isPurchaseHolding() ||
+        (isBranchAuthorized(resource.data.branchId) && resource.data.status == 'MENUNGGU KONFIRMASI')
+      );
+
+      allow delete: if isPurchaseHolding() || isHoldingOwner();
+    }
+  }
+}

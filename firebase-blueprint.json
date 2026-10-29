@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Toko Kopi Mergan Firebase Blueprint",
+  "description": "Schema and security blueprint for Toko Kopi Mergan multi-branch cafe financial & operational management system.",
+  "roles": [
+    "OWNER_HOLDING",
+    "PURCHASE_HOLDING",
+    "OWNER_CABANG",
+    "KEPALA_TOKO",
+    "PURCHASE_CABANG"
+  ],
+  "branches": [
+    "mergan",
+    "dinoyo",
+    "sulfat",
+    "sigura",
+    "suhat"
+  ]
+}
