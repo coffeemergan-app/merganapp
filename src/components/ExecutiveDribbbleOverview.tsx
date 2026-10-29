@@ -1,46 +1,35 @@
 import React, { useState } from 'react';
 import {
-  Activity,
   AlertCircle,
-  ArrowDownLeft,
-  ArrowUpRight,
-  BarChart2,
-  Bell,
-  Box,
+  ArrowRight,
+  Award,
+  Banknote,
+  Building2,
   Calendar,
   CheckCircle2,
-  ChevronDown,
   Clock,
   Compass,
-  CreditCard,
-  DollarSign,
   Download,
   ExternalLink,
+  Eye,
+  FileText,
   Filter,
-  Flame,
-  HelpCircle,
   Info,
   Layers,
-  Moon,
+  Lock,
   Package,
   Plus,
   Printer,
-  Radio,
-  Search,
-  Send,
   Shield,
+  ShieldCheck,
   ShoppingBag,
   SlidersHorizontal,
-  Smile,
-  Sparkles,
-  Sun,
-  TrendingDown,
+  Store,
   TrendingUp,
   Truck,
   UserCheck,
   Users,
   Wallet,
-  X,
 } from 'lucide-react';
 import { Branch, BranchOrder, DailyExpense, ShiftRekap, User } from '../types';
 import { formatRupiah } from '../utils/format';
@@ -60,10 +49,14 @@ interface ExecutiveDribbbleOverviewProps {
   onOpenOrderModal: () => void;
   onOpenHtmlModal: () => void;
   onOpenRulesModal: () => void;
+  onOpenUserManagementModal?: () => void;
+  onOpenPermissionsModal?: () => void;
   onNavigateTab: (tab: 'KASIR' | 'BELANJA' | 'ORDER' | 'ABSENSI' | 'GAJI' | 'MASTER') => void;
   canInputKasir: boolean;
   canInputBelanja: boolean;
   canInputOrder: boolean;
+  canConfirmOrder?: boolean;
+  canEditMaster?: boolean;
 }
 
 export const ExecutiveDribbbleOverview: React.FC<ExecutiveDribbbleOverviewProps> = ({
@@ -80,645 +73,814 @@ export const ExecutiveDribbbleOverview: React.FC<ExecutiveDribbbleOverviewProps>
   onOpenOrderModal,
   onOpenHtmlModal,
   onOpenRulesModal,
+  onOpenUserManagementModal,
+  onOpenPermissionsModal,
   onNavigateTab,
   canInputKasir,
   canInputBelanja,
   canInputOrder,
+  canConfirmOrder = false,
+  canEditMaster = false,
 }) => {
-  // Currency mode toggle: USD vs IDR (defaulting to USD matching image, or IDR)
-  const [currencyMode, setCurrencyMode] = useState<'USD' | 'IDR'>('USD');
-  const [activeDay, setActiveDay] = useState<string>('Sun');
-  const [transactionTimeframe, setTransactionTimeframe] = useState('This Week');
-  const [selectedTransactions, setSelectedTransactions] = useState<string[]>(['tx-2']);
+  // Mode Holding: Owner Holding & Purchase Holding view ALL branches consolidated
+  const isOwnerHolding = currentUser.role === 'OWNER_HOLDING';
+  const isPurchaseHolding = currentUser.role === 'PURCHASE_HOLDING';
+  const isOwnerCabang = currentUser.role === 'OWNER_CABANG';
+  const isKepalaToko = currentUser.role === 'KEPALA_TOKO';
+  const isPurchaseCabang = currentUser.role === 'PURCHASE_CABANG';
+  const isHoldingUser = isOwnerHolding || isPurchaseHolding;
 
-  // Convert Rp to USD equivalent for the concept (rate approx 1 USD = Rp 15.500)
-  const rate = 15500;
-  const toDisplay = (idr: number) => {
-    if (currencyMode === 'IDR') {
-      return formatRupiah(idr);
+  // Filter state for holding view: 'all' or specific branch
+  const [holdingFilter, setHoldingFilter] = useState<string>('all');
+  const [filterType, setFilterType] = useState<'all' | 'shift' | 'expense' | 'order'>('all');
+
+  // CONSOLIDATED CALCULATIONS (ALL 3 BRANCHES COMBINED)
+  const totalCashAll = shifts.reduce((s, x) => s + (x.cash || 0), 0);
+  const totalQrisAll = shifts.reduce((s, x) => s + (x.qris || 0), 0);
+  const totalIncomeAll = totalCashAll + totalQrisAll;
+  const totalExpenseAll = expenses.reduce((s, x) => s + (x.totalBiaya || 0), 0);
+  const totalNetAll = totalIncomeAll - totalExpenseAll;
+  const totalMarginAll = totalIncomeAll > 0 ? ((totalNetAll / totalIncomeAll) * 100).toFixed(1) : '0';
+  const totalPendingOrdersAll = orders.filter((o) => o.status === 'MENUNGGU KONFIRMASI').length;
+  const totalCriticalOrdersAll = orders.filter(
+    (o) => o.urgensi === 'Mendesak / Stok Kritis' && o.status !== 'SELESAI / TERKIRIM'
+  ).length;
+
+  // BRANCH SPECIFIC CALCULATIONS
+  const targetBranchId = isHoldingUser && holdingFilter !== 'all' ? holdingFilter : branch.id;
+  const branchShifts = shifts.filter((s) => s.branchId === targetBranchId);
+  const branchExpenses = expenses.filter((e) => e.branchId === targetBranchId);
+  const branchOrders = orders.filter((o) => o.branchId === targetBranchId);
+
+  const branchCash = branchShifts.reduce((s, x) => s + (x.cash || 0), 0);
+  const branchQris = branchShifts.reduce((s, x) => s + (x.qris || 0), 0);
+  const branchIncome = branchCash + branchQris;
+  const branchExpense = branchExpenses.reduce((s, x) => s + (x.totalBiaya || 0), 0);
+  const branchNet = branchIncome - branchExpense;
+  const branchMargin = branchIncome > 0 ? ((branchNet / branchIncome) * 100).toFixed(1) : '0';
+  const branchPendingOrders = branchOrders.filter((o) => o.status === 'MENUNGGU KONFIRMASI').length;
+  const branchCriticalOrders = branchOrders.filter(
+    (o) => o.urgensi === 'Mendesak / Stok Kritis' && o.status !== 'SELESAI / TERKIRIM'
+  ).length;
+
+  // Active KPI numbers to show in Top Metric Cards
+  const showAllBranches = isHoldingUser && holdingFilter === 'all';
+  const activeIncome = showAllBranches ? totalIncomeAll : branchIncome;
+  const activeCash = showAllBranches ? totalCashAll : branchCash;
+  const activeQris = showAllBranches ? totalQrisAll : branchQris;
+  const activeExpense = showAllBranches ? totalExpenseAll : branchExpense;
+  const activeNet = showAllBranches ? totalNetAll : branchNet;
+  const activeMargin = showAllBranches ? totalMarginAll : branchMargin;
+  const activePendingOrders = showAllBranches ? totalPendingOrdersAll : branchPendingOrders;
+  const activeCriticalOrders = showAllBranches ? totalCriticalOrdersAll : branchCriticalOrders;
+  const activeShiftCount = showAllBranches ? shifts.length : branchShifts.length;
+  const activeExpenseCount = showAllBranches ? expenses.length : branchExpenses.length;
+
+  // Multi-Cabang Breakdown Cards Data
+  const branchCardsData = branches.map((b) => {
+    const sList = shifts.filter((s) => s.branchId === b.id);
+    const eList = expenses.filter((e) => e.branchId === b.id);
+    const oList = orders.filter((o) => o.branchId === b.id);
+
+    const cIncome = sList.reduce((acc, s) => acc + (s.cash || 0) + (s.qris || 0), 0);
+    const cExpense = eList.reduce((acc, e) => acc + (e.totalBiaya || 0), 0);
+    const cNet = cIncome - cExpense;
+    const cMargin = cIncome > 0 ? Math.round((cNet / cIncome) * 100) : 0;
+    const cPending = oList.filter((o) => o.status === 'MENUNGGU KONFIRMASI').length;
+
+    let badgeColor = 'bg-amber-50 text-amber-800 border-amber-300';
+    let dotColor = 'bg-amber-500';
+    if (b.id === 'urip') {
+      badgeColor = 'bg-emerald-50 text-emerald-800 border-emerald-300';
+      dotColor = 'bg-emerald-500';
+    } else if (b.id === 'madiun') {
+      badgeColor = 'bg-blue-50 text-blue-800 border-blue-300';
+      dotColor = 'bg-blue-500';
     }
-    const val = (idr / rate).toFixed(2);
-    return `$${parseFloat(val).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-  };
 
-  // Aggregated calculations for current branch
-  const currentShifts = shifts.filter((s) => s.branchId === branch.id);
-  const currentExpenses = expenses.filter((e) => e.branchId === branch.id);
+    return {
+      branch: b,
+      income: cIncome,
+      expense: cExpense,
+      net: cNet,
+      margin: cMargin,
+      shiftCount: sList.length,
+      expenseCount: eList.length,
+      pendingOrders: cPending,
+      badgeColor,
+      dotColor,
+    };
+  });
 
-  const totalCash = currentShifts.reduce((s, x) => s + (x.cash || 0), 0);
-  const totalQris = currentShifts.reduce((s, x) => s + (x.qris || 0), 0);
-  const totalIncome = totalCash + totalQris;
-  const totalExpense = currentExpenses.reduce((s, x) => s + (x.totalBiaya || 0), 0);
-  const netBalance = totalIncome - totalExpense;
+  // Consolidated activity timeline / transactions
+  interface ActivityItem {
+    id: string;
+    date: string;
+    branchId: string;
+    branchName: string;
+    type: 'shift' | 'expense' | 'order';
+    title: string;
+    nominal: number;
+    nominalFormatted: string;
+    pic: string;
+    note: string;
+    status: string;
+    statusColor: string;
+  }
 
-  // Chart data simulation points per day
-  const chartDays = [
-    { day: 'Wed', users: '12k', val: 12, displayVal: '$78.4' },
-    { day: 'Thu', users: '15k', val: 15, displayVal: '$95.2' },
-    { day: 'Fri', users: '18k', val: 18, displayVal: '$112.0' },
-    { day: 'Sat', users: '24k', val: 24, displayVal: '$148.5' },
-    { day: 'Sun', users: '28k', val: 28, displayVal: '$126.3' },
-    { day: 'Mon', users: '19k', val: 19, displayVal: '$104.2' },
-    { day: 'Tue', users: '21k', val: 21, displayVal: '$118.0' },
-  ];
+  const activities: ActivityItem[] = [];
 
-  const currentChartPoint = chartDays.find((c) => c.day === activeDay) || chartDays[4];
+  // Shifts
+  const currentShiftsPool = isHoldingUser && holdingFilter === 'all' ? shifts : branchShifts;
+  currentShiftsPool.forEach((s) => {
+    const b = branches.find((x) => x.id === s.branchId);
+    activities.push({
+      id: `shift-${s.id}`,
+      date: s.tanggal,
+      branchId: s.branchId,
+      branchName: b?.shortName || s.branchId,
+      type: 'shift',
+      title: `Rekap Kasir: ${s.shift}`,
+      nominal: (s.cash || 0) + (s.qris || 0),
+      nominalFormatted: formatRupiah((s.cash || 0) + (s.qris || 0)),
+      pic: s.person,
+      note: `Cash: ${formatRupiah(s.cash || 0)} | QRIS: ${formatRupiah(s.qris || 0)}${s.catatan ? ` • ${s.catatan}` : ''}`,
+      status: 'Kasir Selesai',
+      statusColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    });
+  });
 
-  // Combined Recent Transactions list
-  const recentTransactions = [
-    {
-      id: 'tx-1',
-      activity: 'Restok Sirup Vanilla & Hazelnut',
+  // Expenses
+  const currentExpensesPool = isHoldingUser && holdingFilter === 'all' ? expenses : branchExpenses;
+  currentExpensesPool.forEach((e) => {
+    const b = branches.find((x) => x.id === e.branchId);
+    activities.push({
+      id: `expense-${e.id}`,
+      date: e.tanggal,
+      branchId: e.branchId,
+      branchName: b?.shortName || e.branchId,
       type: 'expense',
-      price: currencyMode === 'USD' ? '$24.99' : 'Rp 387.000',
-      date: '12 Apr 2026',
-      time: '10:45 AM',
-      note: 'Supplier Toko Bahan Kue',
-      status: 'Failed',
-      statusColor: 'text-rose-600 bg-rose-50 border-rose-200',
-      iconColor: 'bg-blue-500 text-white',
-    },
-    {
-      id: 'tx-2',
-      activity: 'Rekap Kasir Shift Pagi (Siti)',
-      type: 'income',
-      price: currencyMode === 'USD' ? '$320.00' : 'Rp 4.960.000',
-      date: '10 Apr 2026',
-      time: '08:30 PM',
-      note: 'Penerimaan Cash + QRIS 42 Struk',
-      status: 'Successful',
-      statusColor: 'text-emerald-700 bg-emerald-50 border-emerald-200',
-      iconColor: 'bg-rose-500 text-white',
-    },
-    {
-      id: 'tx-3',
-      activity: 'Belanja Susu Diamond Fresh Milk',
-      type: 'expense',
-      price: currencyMode === 'USD' ? '$76.20' : 'Rp 1.181.000',
-      date: '14 Apr 2026',
-      time: '07:10 PM',
-      note: '10 Karton untuk Barista',
-      status: 'Pending',
-      statusColor: 'text-amber-700 bg-amber-50 border-amber-200',
-      iconColor: 'bg-emerald-500 text-white',
-    },
-    {
-      id: 'tx-4',
-      activity: 'Rekap Kasir Shift Malam (Rian)',
-      type: 'income',
-      price: currencyMode === 'USD' ? '$149.30' : 'Rp 2.314.000',
-      date: '11 Apr 2026',
-      time: '11:15 PM',
-      note: 'Shift penutupan toko harian',
-      status: 'Successful',
-      statusColor: 'text-emerald-700 bg-emerald-50 border-emerald-200',
-      iconColor: 'bg-indigo-500 text-white',
-    },
-  ];
+      title: `Belanja: ${e.rincianBarang}`,
+      nominal: e.totalBiaya || 0,
+      nominalFormatted: formatRupiah(e.totalBiaya || 0),
+      pic: e.personPurchase,
+      note: `${e.kuantitas} ${e.satuan} (${e.kategori})${e.supplier ? ` • Toko: ${e.supplier}` : ''}`,
+      status: 'Belanja Terkunci',
+      statusColor: 'bg-rose-50 text-rose-700 border-rose-200',
+    });
+  });
 
-  const toggleSelectTx = (id: string) => {
-    setSelectedTransactions((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
-  };
+  // Orders
+  const currentOrdersPool = isHoldingUser && holdingFilter === 'all' ? orders : branchOrders;
+  currentOrdersPool.forEach((o) => {
+    const b = branches.find((x) => x.id === o.branchId);
+    const itemNames = o.items?.map((it) => `${it.merekBarang} (${it.kuantitas} ${it.satuan})`).join(', ') || 'Restok Bahan Baku';
+    activities.push({
+      id: `order-${o.id}`,
+      date: o.tanggal,
+      branchId: o.branchId,
+      branchName: b?.shortName || o.branchId,
+      type: 'order',
+      title: `Order: ${o.nomorOrder}`,
+      nominal: 0,
+      nominalFormatted: `${o.items?.length || 0} Jenis Barang`,
+      pic: o.pemohon,
+      note: `${itemNames} • Urgensi: ${o.urgensi}`,
+      status: o.status,
+      statusColor:
+        o.status === 'SELESAI / TERKIRIM'
+          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+          : o.status === 'DIPROSES PURCHASE'
+          ? 'bg-blue-50 text-blue-700 border-blue-200'
+          : 'bg-amber-50 text-amber-700 border-amber-200',
+    });
+  });
 
-  const selectAllTx = () => {
-    if (selectedTransactions.length === recentTransactions.length) {
-      setSelectedTransactions([]);
-    } else {
-      setSelectedTransactions(recentTransactions.map((t) => t.id));
-    }
-  };
+  // Sort activities by date descending
+  activities.sort((a, b) => (a.date < b.date ? 1 : -1));
+
+  const filteredActivities = activities.filter((act) => {
+    if (filterType === 'all') return true;
+    return act.type === filterType;
+  });
 
   return (
     <div className="space-y-6">
-      {/* 1. TOP ROW: 4 HORIZONTAL CARDS (INCLUDING VIBRANT PINK-ORANGE GRADIENT CARD) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: Invest for your future */}
-        <div className="bg-white rounded-2xl p-4.5 border border-stone-200/80 shadow-xs flex flex-col justify-between hover:shadow-md transition">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs font-bold text-stone-900">Invest for your future</p>
-              <p className="text-[11px] text-stone-400 mt-0.5">Target Omzet &amp; Profit Toko</p>
-            </div>
-            <div className="w-6 h-6 rounded-full bg-stone-100 flex items-center justify-center text-stone-600">
-              <Compass className="w-3.5 h-3.5" />
-            </div>
+      {/* 1. SIMPLE EXECUTIVE HEADER BANNER */}
+      <div className="bg-white rounded-2xl p-5 border border-stone-200/90 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="p-2 bg-stone-900 text-white rounded-xl shadow-xs">
+              <Building2 className="w-5 h-5 text-amber-400" />
+            </span>
+            <h1 className="text-xl sm:text-2xl font-black text-stone-900 tracking-tight">
+              {isHoldingUser
+                ? 'Dashboard Konsolidasi Holding Toko Kopi Mergan'
+                : `Dashboard Operasional ${branch.name}`}
+            </h1>
           </div>
-          <div className="mt-4">
-            <button
-              onClick={() => onNavigateTab('KASIR')}
-              className="px-3.5 py-1.5 rounded-full bg-[#f4f5f6] hover:bg-stone-200 text-xs font-bold text-stone-800 transition cursor-pointer"
-            >
-              {currencyMode === 'USD' ? '$254.32' : 'Rp 3.940.000'}
-            </button>
+
+          <p className="text-xs text-stone-500 mt-1 max-w-3xl">
+            {isHoldingUser ? (
+              <span>
+                Menyatukan seluruh data finansial &amp; logistik <b>3 Cabang</b>: Pusat Sumbawa, Cabang Urip Sumoharjo, dan Cabang Madiun dalam satu layar audit terpadu.
+              </span>
+            ) : (
+              <span>
+                {branch.address} • Telp: {branch.phone || '0812-3456-7890'} • PIC: {branch.headStore || 'Kepala Toko'}
+              </span>
+            )}
+          </p>
+
+          {/* Role & Permissions Status Badge */}
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+            <span className="px-2.5 py-1 rounded-full font-bold bg-stone-900 text-white flex items-center space-x-1.5 shadow-2xs">
+              <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+              <span>{currentUser.name} ({currentUser.roleLabel})</span>
+            </span>
+
+            {isOwnerHolding && (
+              <span className="px-2.5 py-1 rounded-full font-bold bg-amber-50 text-amber-800 border border-amber-300 flex items-center space-x-1">
+                <Lock className="w-3 h-3 text-amber-600" />
+                <span>Full Akses Semua Cabang (Mode Audit Read-Only / Tidak Bisa Edit)</span>
+              </span>
+            )}
+
+            {isPurchaseHolding && (
+              <span className="px-2.5 py-1 rounded-full font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 flex items-center space-x-1">
+                <Package className="w-3 h-3 text-emerald-600" />
+                <span>Purchase Holding: Kelola Master Bahan Baku &amp; Konfirmasi Order</span>
+              </span>
+            )}
+
+            {isOwnerCabang && (
+              <span className="px-2.5 py-1 rounded-full font-bold bg-amber-50 text-amber-800 border border-amber-300 flex items-center space-x-1">
+                <Lock className="w-3 h-3 text-amber-600" />
+                <span>Owner Cabang: Monitoring Audit (Read-Only)</span>
+              </span>
+            )}
+
+            {isKepalaToko && (
+              <span className="px-2.5 py-1 rounded-full font-bold bg-blue-50 text-blue-800 border border-blue-300 flex items-center space-x-1">
+                <CheckCircle2 className="w-3 h-3 text-blue-600" />
+                <span>Kepala Toko: Input Kasir, Absensi &amp; Gaji Cabang</span>
+              </span>
+            )}
+
+            {isPurchaseCabang && (
+              <span className="px-2.5 py-1 rounded-full font-bold bg-rose-50 text-rose-800 border border-rose-300 flex items-center space-x-1">
+                <ShoppingBag className="w-3 h-3 text-rose-600" />
+                <span>Purchase Cabang: Input Belanja Harian &amp; Order Restok</span>
+              </span>
+            )}
           </div>
         </div>
 
-        {/* Card 2: Early for kids */}
-        <div className="bg-white rounded-2xl p-4.5 border border-stone-200/80 shadow-xs flex flex-col justify-between hover:shadow-md transition">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs font-bold text-stone-900">Early for kids</p>
-              <p className="text-[11px] text-stone-400 mt-0.5">Pengadaan &amp; Pelatihan Staf</p>
-            </div>
-            <div className="w-6 h-6 rounded-full bg-stone-100 flex items-center justify-center text-stone-600">
-              <Smile className="w-3.5 h-3.5" />
-            </div>
-          </div>
-          <div className="mt-4">
-            <button
-              onClick={() => onNavigateTab('BELANJA')}
-              className="px-3.5 py-1.5 rounded-full bg-[#f4f5f6] hover:bg-stone-200 text-xs font-bold text-stone-800 transition cursor-pointer"
-            >
-              Explore
-            </button>
-          </div>
-        </div>
-
-        {/* Card 3: Balance your budget */}
-        <div className="bg-white rounded-2xl p-4.5 border border-stone-200/80 shadow-xs flex flex-col justify-between hover:shadow-md transition">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs font-bold text-stone-900">Balance your budget</p>
-              <p className="text-[11px] text-stone-400 mt-0.5">Audit Kasir &amp; Purchase</p>
-            </div>
-            <div className="w-6 h-6 rounded-full bg-stone-100 flex items-center justify-center text-stone-600">
-              <Wallet className="w-3.5 h-3.5" />
-            </div>
-          </div>
-          <div className="mt-4">
-            <button
-              onClick={() => onNavigateTab('GAJI')}
-              className="px-3.5 py-1.5 rounded-full bg-[#f4f5f6] hover:bg-stone-200 text-xs font-bold text-stone-800 transition cursor-pointer"
-            >
-              April 2026
-            </button>
-          </div>
-        </div>
-
-        {/* Card 4: Retire on your terms (Signature Vibrant Gradient Card with Soundwave) */}
-        <div className="rounded-2xl p-4.5 bg-gradient-to-r from-pink-500 via-rose-500 to-amber-500 text-white shadow-sm flex flex-col justify-between relative overflow-hidden">
-          <div className="flex items-start justify-between relative z-10">
-            <div>
-              <p className="text-xs font-bold text-white tracking-wide">Retire on your terms</p>
-              <p className="text-[11px] text-pink-100 mt-0.5">Holding Multi-Cabang Mergan</p>
-            </div>
-            <div className="w-6 h-6 rounded-full bg-white/20 backdrop-blur-xs flex items-center justify-center text-white">
-              <Radio className="w-3.5 h-3.5" />
-            </div>
-          </div>
-
-          <div className="mt-4 flex items-end justify-between relative z-10">
-            <button
-              onClick={() => onNavigateTab('ORDER')}
-              className="px-4 py-1.5 rounded-full bg-white text-stone-900 text-xs font-bold shadow-xs hover:bg-stone-100 transition cursor-pointer"
-            >
-              Explore
-            </button>
-
-            {/* Soundwave / Frequency bar visualization */}
-            <div className="flex items-end space-x-0.5 h-8 opacity-80">
-              {[8, 14, 20, 26, 30, 24, 18, 12, 16, 22, 28, 24, 18, 14, 10, 6].map((h, i) => (
-                <div
-                  key={i}
-                  className="w-1 bg-white rounded-full transition-all duration-300"
-                  style={{ height: `${h}px` }}
-                />
+        {/* Right Tools: Branch Filter Pill for Holding + Print/Export Actions */}
+        <div className="flex flex-wrap items-center gap-2">
+          {isHoldingUser && (
+            <div className="flex items-center space-x-1.5 bg-stone-100 p-1 rounded-xl border border-stone-200 text-xs">
+              <span className="text-[11px] font-bold text-stone-500 px-2">Lihat:</span>
+              <button
+                onClick={() => setHoldingFilter('all')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
+                  holdingFilter === 'all'
+                    ? 'bg-stone-900 text-white shadow-xs'
+                    : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200'
+                }`}
+              >
+                Semua Cabang (Satu Layar)
+              </button>
+              {branches.map((b) => (
+                <button
+                  key={b.id}
+                  onClick={() => {
+                    setHoldingFilter(b.id);
+                    onSelectBranch(b.id);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
+                    holdingFilter === b.id
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200'
+                  }`}
+                >
+                  {b.shortName}
+                </button>
               ))}
+            </div>
+          )}
+
+          {/* Quick PDF & Print buttons */}
+          <button
+            onClick={() => window.print()}
+            className="px-3.5 py-2 rounded-xl bg-white hover:bg-stone-50 border border-stone-200 text-xs font-bold text-stone-700 flex items-center space-x-1.5 shadow-2xs transition cursor-pointer"
+            title="Cetak Laporan Konsolidasi"
+          >
+            <Printer className="w-4 h-4 text-stone-600" />
+            <span>Print</span>
+          </button>
+
+          <button
+            onClick={() => exportShiftsToPdf(showAllBranches ? shifts : branchShifts, showAllBranches ? 'Konsolidasi Seluruh Cabang' : branch.name)}
+            className="px-3.5 py-2 rounded-xl bg-white hover:bg-rose-50 border border-stone-200 text-xs font-bold text-rose-700 flex items-center space-x-1.5 shadow-2xs transition cursor-pointer"
+            title="Unduh Laporan PDF"
+          >
+            <Download className="w-4 h-4 text-rose-600" />
+            <span>PDF</span>
+          </button>
+
+          {isOwnerHolding && onOpenUserManagementModal && (
+            <button
+              onClick={onOpenUserManagementModal}
+              className="px-3.5 py-2 rounded-xl bg-stone-900 hover:bg-black text-xs font-bold text-white flex items-center space-x-1.5 shadow-xs transition cursor-pointer"
+            >
+              <Users className="w-4 h-4 text-amber-400" />
+              <span>Atur Akun</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* 2. 4 SIMPLE, CLEAN KPI CARDS IN RUPIAH */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Card 1: Total Omzet Kasir */}
+        <div className="bg-white rounded-2xl p-4.5 border border-stone-200/80 shadow-xs flex flex-col justify-between hover:border-amber-300 transition">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-stone-500 uppercase tracking-wider">
+              {showAllBranches ? 'Omzet Kasir (3 Cabang)' : 'Omzet Kasir Cabang'}
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-700">
+              <Banknote className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-3">
+            <h2 className="text-2xl font-black text-stone-900 tracking-tight font-mono">
+              {formatRupiah(activeIncome)}
+            </h2>
+            <div className="mt-1 flex items-center justify-between text-[11px] text-stone-500">
+              <span>Tunai: <b>{formatRupiah(activeCash)}</b></span>
+              <span>•</span>
+              <span>QRIS: <b>{formatRupiah(activeQris)}</b></span>
+            </div>
+            <div className="mt-1.5 pt-1.5 border-t border-stone-100 flex items-center justify-between text-[11px] text-stone-400">
+              <span>{activeShiftCount} shift tercatat</span>
+              <button
+                onClick={() => onNavigateTab('KASIR')}
+                className="text-amber-700 font-bold hover:underline inline-flex items-center"
+              >
+                Buka Kasir <ArrowRight className="w-3 h-3 ml-0.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Card 2: Total Belanja Operasional */}
+        <div className="bg-white rounded-2xl p-4.5 border border-stone-200/80 shadow-xs flex flex-col justify-between hover:border-rose-300 transition">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-stone-500 uppercase tracking-wider">
+              {showAllBranches ? 'Belanja Purchase (3 Cabang)' : 'Belanja Purchase Cabang'}
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-700">
+              <ShoppingBag className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-3">
+            <h2 className="text-2xl font-black text-rose-700 tracking-tight font-mono">
+              {formatRupiah(activeExpense)}
+            </h2>
+            <div className="mt-1 text-[11px] text-stone-500">
+              <span>{activeExpenseCount} nota belanja bahan baku &amp; operasional</span>
+            </div>
+            <div className="mt-1.5 pt-1.5 border-t border-stone-100 flex items-center justify-between text-[11px] text-stone-400">
+              <span className="text-emerald-700 font-semibold">Terkunci per hari</span>
+              <button
+                onClick={() => onNavigateTab('BELANJA')}
+                className="text-rose-700 font-bold hover:underline inline-flex items-center"
+              >
+                Buka Belanja <ArrowRight className="w-3 h-3 ml-0.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Card 3: Laba Bersih Operasional */}
+        <div className="bg-white rounded-2xl p-4.5 border border-stone-200/80 shadow-xs flex flex-col justify-between hover:border-emerald-300 transition">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-stone-500 uppercase tracking-wider">
+              {showAllBranches ? 'Laba Bersih Konsolidasi' : 'Laba Bersih Cabang'}
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-700">
+              <TrendingUp className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-3">
+            <h2 className="text-2xl font-black text-emerald-700 tracking-tight font-mono">
+              {formatRupiah(activeNet)}
+            </h2>
+            <div className="mt-1 flex items-center space-x-1.5 text-[11px]">
+              <span className="px-1.5 py-0.5 rounded font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                Margin {activeMargin}%
+              </span>
+              <span className="text-stone-400">dari total omzet</span>
+            </div>
+            <div className="mt-1.5 pt-1.5 border-t border-stone-100 flex items-center justify-between text-[11px] text-stone-400">
+              <span>Kasir dikurangi Belanja</span>
+              <span className="text-emerald-700 font-bold">Surplus Sehat</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Card 4: Pengadaan & Order Bahan Baku */}
+        <div className="bg-white rounded-2xl p-4.5 border border-stone-200/80 shadow-xs flex flex-col justify-between hover:border-blue-300 transition">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-stone-500 uppercase tracking-wider">
+              Order Restok Bahan Baku
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-700">
+              <Package className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-3">
+            <h2 className="text-2xl font-black text-stone-900 tracking-tight font-mono">
+              {activePendingOrders} <span className="text-sm font-semibold text-stone-500 font-sans">Menunggu</span>
+            </h2>
+            <div className="mt-1 text-[11px] text-stone-500 flex items-center space-x-1">
+              {activeCriticalOrders > 0 ? (
+                <span className="text-rose-600 font-bold bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
+                  {activeCriticalOrders} Stok Kritis!
+                </span>
+              ) : (
+                <span className="text-emerald-700 font-semibold">Stok cabang aman</span>
+              )}
+            </div>
+            <div className="mt-1.5 pt-1.5 border-t border-stone-100 flex items-center justify-between text-[11px] text-stone-400">
+              <span>Logistik &amp; Holding</span>
+              <button
+                onClick={() => onNavigateTab('ORDER')}
+                className="text-blue-700 font-bold hover:underline inline-flex items-center"
+              >
+                Cek Order <ArrowRight className="w-3 h-3 ml-0.5" />
+              </button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* 2. MIDDLE ROW: 3 MAIN WIDGETS (CURRENT PRICE, ACTIVE USERS CHART, 2x2 METRICS) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
-        {/* Left Column: Current Price Trading Card (3.5 cols) */}
-        <div className="lg:col-span-3.5 bg-white rounded-2xl p-5 border border-stone-200/80 shadow-xs flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-stone-400">Current Price</span>
-              {/* Currency Dropdown Pill */}
-              <button
-                onClick={() => setCurrencyMode(currencyMode === 'USD' ? 'IDR' : 'USD')}
-                className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-stone-50 border border-stone-200 text-xs font-bold text-stone-700 hover:bg-stone-100 transition cursor-pointer"
-              >
-                <span className="w-4 h-3 bg-red-600 rounded-2xs inline-block relative overflow-hidden">
-                  <span className="absolute top-0 left-0 w-2 h-1.5 bg-blue-800"></span>
-                </span>
-                <span>{currencyMode}</span>
-                <ChevronDown className="w-3 h-3 text-stone-400" />
-              </button>
+      {/* 3. MULTI-CABANG CONSOLIDATION GRID (SEMUA CABANG JADI SATU UNTUK HOLDING) */}
+      {isHoldingUser && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-black text-stone-900">Performa 3 Cabang Toko Kopi Mergan</h3>
+              <p className="text-xs text-stone-500">Perbandingan real-time omzet, belanja, dan laba operasional antar cabang</p>
             </div>
-
-            <div className="mt-2.5">
-              <h2 className="text-2xl font-black text-stone-900 tracking-tight font-mono">
-                {currencyMode === 'USD' ? '114.72 USD' : formatRupiah(1147200)}
-              </h2>
-            </div>
-
-            {/* 2x3 Metric Grid with separator */}
-            <div className="mt-4 p-3 bg-stone-50/70 rounded-xl border border-stone-200/70 grid grid-cols-2 gap-y-2.5 gap-x-4 text-xs font-mono">
-              <div className="flex items-center justify-between border-b border-stone-200/50 pb-1.5">
-                <span className="text-stone-400 font-sans text-[11px]">Open</span>
-                <span className="font-bold text-stone-800">124.9</span>
-              </div>
-              <div className="flex items-center justify-between border-b border-stone-200/50 pb-1.5">
-                <span className="text-stone-400 font-sans text-[11px]">Vol</span>
-                <span className="font-bold text-stone-800">32.6M</span>
-              </div>
-              <div className="flex items-center justify-between border-b border-stone-200/50 pb-1.5">
-                <span className="text-stone-400 font-sans text-[11px]">High</span>
-                <span className="font-bold text-stone-800">115.1</span>
-              </div>
-              <div className="flex items-center justify-between border-b border-stone-200/50 pb-1.5">
-                <span className="text-stone-400 font-sans text-[11px]">P/E</span>
-                <span className="font-bold text-stone-800">12.4</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-stone-400 font-sans text-[11px]">Low</span>
-                <span className="font-bold text-stone-800">36.7</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-stone-400 font-sans text-[11px]">Mkt Cap</span>
-                <span className="font-bold text-stone-800">6.004T</span>
-              </div>
-            </div>
+            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-stone-100 text-stone-700 border border-stone-200">
+              3 Cabang Terkoneksi
+            </span>
           </div>
 
-          {/* Sell / Buy Action Buttons */}
-          <div className="mt-5 grid grid-cols-2 gap-2.5">
-            <button
-              onClick={onOpenBelanjaModal}
-              disabled={!canInputBelanja}
-              className={`py-2.5 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 cursor-pointer ${
-                canInputBelanja
-                  ? 'bg-[#18181b] hover:bg-black text-white shadow-xs'
-                  : 'bg-stone-200 text-stone-400 cursor-not-allowed'
-              }`}
-            >
-              <span>Sell</span>
-            </button>
-            <button
-              onClick={onOpenKasirModal}
-              disabled={!canInputKasir}
-              className={`py-2.5 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 cursor-pointer ${
-                canInputKasir
-                  ? 'bg-[#f0f2f5] hover:bg-stone-200 text-stone-900 border border-stone-200'
-                  : 'bg-stone-100 text-stone-400 cursor-not-allowed border border-stone-200'
-              }`}
-            >
-              <span>Buy</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Center Column: Active Users Area Chart Widget (5 cols) */}
-        <div className="lg:col-span-5 bg-white rounded-2xl p-5 border border-stone-200/80 shadow-xs flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-stone-900">Active Users</h3>
-                <p className="text-[11px] text-stone-400">View your income in a certain period of time</p>
-              </div>
-            </div>
-
-            {/* SVG Area Chart with curve & gradient fill */}
-            <div className="relative mt-4 h-36 w-full">
-              {/* Y Axis Guide Marks */}
-              <div className="absolute left-0 top-0 bottom-4 w-7 flex flex-col justify-between text-[10px] text-stone-400 font-mono">
-                <span>30k</span>
-                <span>20k</span>
-                <span>10k</span>
-                <span>0k</span>
-              </div>
-
-              {/* Chart Canvas Area */}
-              <div className="ml-8 h-full relative">
-                {/* Horizontal dotted grid lines */}
-                <div className="absolute inset-0 flex flex-col justify-between pointer-events-none opacity-40">
-                  <div className="border-b border-dashed border-stone-200 w-full"></div>
-                  <div className="border-b border-dashed border-stone-200 w-full"></div>
-                  <div className="border-b border-dashed border-stone-200 w-full"></div>
-                  <div className="border-b border-stone-200 w-full"></div>
-                </div>
-
-                {/* Smooth Curve SVG */}
-                <svg className="w-full h-28 overflow-visible" viewBox="0 0 350 100" preserveAspectRatio="none">
-                  <defs>
-                    <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.35" />
-                      <stop offset="70%" stopColor="#fb923c" stopOpacity="0.15" />
-                      <stop offset="100%" stopColor="#fbbf24" stopOpacity="0.0" />
-                    </linearGradient>
-                  </defs>
-                  {/* Area fill */}
-                  <path
-                    d="M 0,75 L 45,70 L 90,65 L 135,45 L 180,20 L 225,50 L 270,55 L 315,50 L 350,55 L 350,100 L 0,100 Z"
-                    fill="url(#areaGradient)"
-                  />
-                  {/* Smooth curve line */}
-                  <path
-                    d="M 0,75 C 25,73 35,68 45,70 C 65,72 75,67 90,65 C 110,63 120,48 135,45 C 155,42 165,22 180,20 C 195,18 210,48 225,50 C 245,52 255,54 270,55 C 290,56 300,51 315,50 C 330,49 340,54 350,55"
-                    fill="none"
-                    stroke="#f43f5e"
-                    strokeWidth="2"
-                  />
-                  {/* Active highlight vertical dashed indicator */}
-                  <line
-                    x1="180"
-                    y1="20"
-                    x2="180"
-                    y2="100"
-                    stroke="#f43f5e"
-                    strokeWidth="1.5"
-                    strokeDasharray="3 3"
-                  />
-                  {/* Active Data point dot */}
-                  <circle cx="180" cy="20" r="3.5" fill="#18181b" stroke="#ffffff" strokeWidth="2" />
-                </svg>
-
-                {/* Floating Tooltip Pill ($126.3) */}
-                <div
-                  className="absolute -top-1 left-[51%] -translate-x-1/2 bg-white/95 backdrop-blur-xs border border-stone-200 px-2 py-0.5 rounded-md shadow-xs text-[10px] font-bold text-stone-800 font-mono flex items-center space-x-1"
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-pink-500"></span>
-                  <span>{currentChartPoint.displayVal}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Days of week selector pills */}
-          <div className="mt-3 pt-2 flex items-center justify-between text-xs text-stone-500 pl-8">
-            {chartDays.map((c) => (
-              <button
-                key={c.day}
-                onClick={() => setActiveDay(c.day)}
-                className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition cursor-pointer ${
-                  activeDay === c.day
-                    ? 'bg-[#18181b] text-white font-bold shadow-xs'
-                    : 'hover:bg-stone-100 text-stone-600'
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {branchCardsData.map((bData) => (
+              <div
+                key={bData.branch.id}
+                className={`bg-white rounded-2xl p-5 border transition-all ${
+                  holdingFilter === bData.branch.id
+                    ? 'ring-2 ring-amber-500 border-amber-400 shadow-md'
+                    : 'border-stone-200/80 hover:shadow-sm'
                 }`}
               >
-                {c.day}
-              </button>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="flex items-center space-x-1.5">
+                      <span className={`w-2 h-2 rounded-full ${bData.dotColor}`}></span>
+                      <h4 className="font-black text-base text-stone-900">{bData.branch.name}</h4>
+                    </div>
+                    <p className="text-[11px] text-stone-400 mt-0.5">{bData.branch.address}</p>
+                  </div>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${bData.badgeColor}`}>
+                    {bData.branch.shortName}
+                  </span>
+                </div>
+
+                {/* Branch Financial Metrics in Rupiah */}
+                <div className="mt-4 space-y-2 text-xs">
+                  <div className="flex items-center justify-between py-1 border-b border-stone-100">
+                    <span className="text-stone-500">Omzet Kasir:</span>
+                    <span className="font-mono font-bold text-stone-900">{formatRupiah(bData.income)}</span>
+                  </div>
+                  <div className="flex items-center justify-between py-1 border-b border-stone-100">
+                    <span className="text-stone-500">Belanja Purchase:</span>
+                    <span className="font-mono font-bold text-rose-700">{formatRupiah(bData.expense)}</span>
+                  </div>
+                  <div className="flex items-center justify-between py-1 border-b border-stone-100 font-bold">
+                    <span className="text-stone-700">Laba Bersih:</span>
+                    <span className="font-mono text-emerald-700">{formatRupiah(bData.net)}</span>
+                  </div>
+                  <div className="flex items-center justify-between pt-1 text-[11px] text-stone-400">
+                    <span>Margin: <b className="text-stone-700">{bData.margin}%</b></span>
+                    <span>Order Restok: <b className="text-amber-700">{bData.pendingOrders} antri</b></span>
+                  </div>
+                </div>
+
+                {/* Audit Cabang Button */}
+                <div className="mt-4 pt-3 border-t border-stone-100 flex items-center justify-between">
+                  <button
+                    onClick={() => {
+                      onSelectBranch(bData.branch.id);
+                      setHoldingFilter(bData.branch.id);
+                    }}
+                    className="w-full py-2 px-3 rounded-xl bg-stone-50 hover:bg-stone-900 hover:text-white border border-stone-200 text-xs font-bold text-stone-800 transition flex items-center justify-center space-x-1.5 cursor-pointer"
+                  >
+                    <span>Fokus Audit {bData.branch.shortName}</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
             ))}
           </div>
         </div>
+      )}
 
-        {/* Right Column: 2x2 Metric Cards Grid (3.5 cols) */}
-        <div className="lg:col-span-3.5 grid grid-cols-2 gap-3.5">
-          {/* Top Left: Portfolio Type */}
-          <div className="bg-white rounded-2xl p-4 border border-stone-200/80 shadow-xs flex flex-col justify-between">
-            <span className="text-[11px] font-semibold text-stone-400">Portfolio Type</span>
+      {/* 4. ROLE-TAILORED QUICK ACTIONS PANEL */}
+      <div className="bg-white rounded-2xl p-5 border border-stone-200/90 shadow-xs">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-base font-black text-stone-900">Aksi Cepat Berdasarkan Hak Akses Anda</h3>
+            <p className="text-xs text-stone-500">Tombol operasional disesuaikan dengan peran aktif: <b className="text-stone-900">{currentUser.roleLabel}</b></p>
+          </div>
+          <button
+            onClick={() => onOpenPermissionsModal && onOpenPermissionsModal()}
+            className="text-xs text-stone-500 hover:text-stone-900 flex items-center space-x-1 cursor-pointer"
+          >
+            <Info className="w-3.5 h-3.5" />
+            <span>Lihat Aturan Hak Akses (RBAC)</span>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* Action 1: Input Kasir */}
+          <div className={`p-4 rounded-xl border flex flex-col justify-between ${canInputKasir ? 'bg-amber-50/50 border-amber-200 hover:border-amber-400' : 'bg-stone-50 border-stone-200 opacity-60'}`}>
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs text-stone-900">Rekap Kasir Harian</span>
+                <span className="p-1 rounded bg-white text-stone-700 border border-stone-200"><Banknote className="w-3.5 h-3.5" /></span>
+              </div>
+              <p className="text-[11px] text-stone-500 mt-1">Input shift pagi &amp; malam, penerimaan cash &amp; QRIS per tanggal.</p>
+            </div>
             <div className="mt-3">
-              <span className="text-sm font-bold text-stone-900 block">General</span>
-              <span className="text-[10px] text-stone-400">Toko Kopi Mergan</span>
+              {canInputKasir ? (
+                <button
+                  onClick={onOpenKasirModal}
+                  className="w-full py-2 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition flex items-center justify-center space-x-1 cursor-pointer shadow-2xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ Input Rekap Kasir</span>
+                </button>
+              ) : (
+                <div className="py-1.5 px-2 rounded bg-stone-200 text-stone-500 text-[10px] text-center font-medium">
+                  Hanya Kepala Toko
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Top Right: Total Investment */}
-          <div className="bg-white rounded-2xl p-4 border border-stone-200/80 shadow-xs flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-stone-400">Total Investment</span>
+          {/* Action 2: Input Belanja Purchase */}
+          <div className={`p-4 rounded-xl border flex flex-col justify-between ${canInputBelanja ? 'bg-rose-50/50 border-rose-200 hover:border-rose-400' : 'bg-stone-50 border-stone-200 opacity-60'}`}>
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs text-stone-900">Belanja Bahan Baku</span>
+                <span className="p-1 rounded bg-white text-stone-700 border border-stone-200"><ShoppingBag className="w-3.5 h-3.5" /></span>
+              </div>
+              <p className="text-[11px] text-stone-500 mt-1">Input nota belanja harian. Otomatis mengunci kolom belanja kasir harian.</p>
             </div>
-            <div className="mt-1">
-              <span className="inline-block px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                -1.52% Last 7 days
-              </span>
-              <p className="text-base font-black text-stone-900 font-mono mt-1">
-                {currencyMode === 'USD' ? '$4,389.80' : formatRupiah(4389800)}
+            <div className="mt-3">
+              {canInputBelanja ? (
+                <button
+                  onClick={onOpenBelanjaModal}
+                  className="w-full py-2 px-3 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition flex items-center justify-center space-x-1 cursor-pointer shadow-2xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ Input Belanja Harian</span>
+                </button>
+              ) : (
+                <div className="py-1.5 px-2 rounded bg-stone-200 text-stone-500 text-[10px] text-center font-medium">
+                  Hanya Purchase Cabang
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Action 3: Order Restok ke Holding */}
+          <div className={`p-4 rounded-xl border flex flex-col justify-between ${canInputOrder || canConfirmOrder ? 'bg-blue-50/50 border-blue-200 hover:border-blue-400' : 'bg-stone-50 border-stone-200 opacity-60'}`}>
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs text-stone-900">Order Barang Restok</span>
+                <span className="p-1 rounded bg-white text-stone-700 border border-stone-200"><Package className="w-3.5 h-3.5" /></span>
+              </div>
+              <p className="text-[11px] text-stone-500 mt-1">Permintaan restok bahan baku dari cabang ke logistik Holding.</p>
+            </div>
+            <div className="mt-3">
+              {canInputOrder ? (
+                <button
+                  onClick={onOpenOrderModal}
+                  className="w-full py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center justify-center space-x-1 cursor-pointer shadow-2xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ Order Bahan Baku</span>
+                </button>
+              ) : canConfirmOrder ? (
+                <button
+                  onClick={() => onNavigateTab('ORDER')}
+                  className="w-full py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center justify-center space-x-1 cursor-pointer shadow-2xs"
+                >
+                  <span>Konfirmasi Order ({totalPendingOrdersAll})</span>
+                </button>
+              ) : (
+                <div className="py-1.5 px-2 rounded bg-stone-200 text-stone-500 text-[10px] text-center font-medium">
+                  Purchase Cabang &amp; Holding
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Action 4: Master Bahan Baku atau User Management */}
+          <div className={`p-4 rounded-xl border flex flex-col justify-between ${isOwnerHolding || isPurchaseHolding ? 'bg-purple-50/50 border-purple-200 hover:border-purple-400' : 'bg-stone-50 border-stone-200 opacity-60'}`}>
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs text-stone-900">
+                  {isOwnerHolding ? 'Manajemen Pengguna' : 'Master Bahan Baku'}
+                </span>
+                <span className="p-1 rounded bg-white text-stone-700 border border-stone-200"><Layers className="w-3.5 h-3.5" /></span>
+              </div>
+              <p className="text-[11px] text-stone-500 mt-1">
+                {isOwnerHolding
+                  ? 'Atur akun login owner, purchase, dan kepala toko seluruh cabang.'
+                  : 'Katalog harga acuan & spesifikasi bahan baku resmi holding.'}
               </p>
             </div>
-          </div>
-
-          {/* Bottom Left: Net Growth Score */}
-          <div className="bg-white rounded-2xl p-4 border border-stone-200/80 shadow-xs flex flex-col justify-between">
-            <span className="text-[11px] font-semibold text-stone-400">Net Growth Score</span>
-            <div className="mt-1">
-              <span className="inline-block px-1.5 py-0.2 rounded text-[9px] font-bold bg-pink-50 text-pink-700 border border-pink-200">
-                -1.45% Last 7 days
-              </span>
-              <p className="text-base font-black text-stone-900 font-mono mt-1">
-                {currencyMode === 'USD' ? '$7,320' : formatRupiah(7320000)}
-              </p>
-            </div>
-          </div>
-
-          {/* Bottom Right: Strategy Type */}
-          <div className="bg-white rounded-2xl p-4 border border-stone-200/80 shadow-xs flex flex-col justify-between">
-            <span className="text-[11px] font-semibold text-stone-400">Strategy Type</span>
             <div className="mt-3">
-              <span className="text-sm font-bold text-stone-900 block">Steady Growth</span>
-              <span className="text-[10px] text-stone-400">Multi-Cabang POS</span>
+              {isOwnerHolding ? (
+                <button
+                  onClick={() => onOpenUserManagementModal && onOpenUserManagementModal()}
+                  className="w-full py-2 px-3 rounded-lg bg-stone-900 hover:bg-black text-white text-xs font-bold transition flex items-center justify-center space-x-1 cursor-pointer shadow-2xs"
+                >
+                  <Users className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Kelola Semua Akun</span>
+                </button>
+              ) : isPurchaseHolding ? (
+                <button
+                  onClick={() => onNavigateTab('MASTER')}
+                  className="w-full py-2 px-3 rounded-lg bg-purple-700 hover:bg-purple-800 text-white text-xs font-bold transition flex items-center justify-center space-x-1 cursor-pointer shadow-2xs"
+                >
+                  <span>Kelola Master Bahan Baku</span>
+                </button>
+              ) : (
+                <div className="py-1.5 px-2 rounded bg-stone-200 text-stone-500 text-[10px] text-center font-medium">
+                  Khusus Tim Holding
+                </div>
+              )}
             </div>
           </div>
         </div>
-      </div>
 
-      {/* 3. BOTTOM ROW: RECENT TRANSACTION TABLE + YOUR BALANCE & INVESTMENT CARDS */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        {/* Left Column: Recent Transaction Table (8 cols) */}
-        <div className="lg:col-span-8 bg-white rounded-2xl border border-stone-200/80 shadow-xs overflow-hidden">
-          {/* Table Header Controls */}
-          <div className="p-4 sm:p-5 border-b border-stone-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center space-x-2">
-              <h3 className="font-bold text-base text-stone-900">Recent Transaction</h3>
-            </div>
-
-            <div className="flex items-center space-x-2 text-xs">
-              {/* Timeframe Dropdown */}
-              <div className="relative">
-                <button
-                  type="button"
-                  className="flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-stone-50 border border-stone-200 text-stone-700 font-semibold hover:bg-stone-100 transition cursor-pointer"
-                >
-                  <span>{transactionTimeframe}</span>
-                  <ChevronDown className="w-3.5 h-3.5 text-stone-400" />
-                </button>
-              </div>
-
-              {/* Filter Button */}
-              <button
-                type="button"
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-stone-50 border border-stone-200 text-stone-700 font-semibold hover:bg-stone-100 transition cursor-pointer"
-              >
-                <SlidersHorizontal className="w-3.5 h-3.5 text-stone-500" />
-                <span>Filter</span>
-              </button>
-
-              {/* Print & PDF Buttons */}
-              <button
-                onClick={() => window.print()}
-                className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-white border border-stone-300 text-stone-600 hover:text-stone-900 hover:bg-stone-100 transition cursor-pointer"
-                title="Print Transaksi"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Print</span>
-              </button>
-
-              <button
-                onClick={() => exportShiftsToPdf(currentShifts, branch.name)}
-                className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-white border border-stone-300 text-rose-600 hover:bg-rose-50 transition cursor-pointer"
-                title="Download PDF"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>PDF</span>
-              </button>
+        {/* Read-Only Banner for Owner Holding & Owner Cabang */}
+        {(isOwnerHolding || isOwnerCabang) && (
+          <div className="mt-4 p-3 rounded-xl bg-amber-50/80 border border-amber-200 flex items-start space-x-2 text-xs text-amber-900">
+            <Lock className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold">Mode Audit Read-Only Aktif</p>
+              <p className="text-[11px] text-amber-800 mt-0.5">
+                Akun Owner Holding dan Owner Cabang memiliki akses baca penuh terhadap seluruh metrik, laporan keuangan, dan slip gaji, namun transaksi operasional dikunci dari pengeditan langsung demi menjaga transparansi kasir dan purchase.
+              </p>
             </div>
           </div>
+        )}
+      </div>
 
-          {/* Table Content */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-stone-50/70 text-stone-400 font-semibold border-b border-stone-100">
-                  <th className="py-3 px-4 w-10 text-center">
-                    <input
-                      type="checkbox"
-                      checked={selectedTransactions.length === recentTransactions.length}
-                      onChange={selectAllTx}
-                      className="rounded border-stone-300 text-stone-900 focus:ring-stone-900 cursor-pointer"
-                    />
-                  </th>
-                  <th className="py-3 px-3">Activity</th>
-                  <th className="py-3 px-3">Price</th>
-                  <th className="py-3 px-3">Date</th>
-                  <th className="py-3 px-3">Note</th>
-                  <th className="py-3 px-4 text-center">Status</th>
+      {/* 5. SIMPLE RECENT ACTIVITY TABLE */}
+      <div className="bg-white rounded-2xl border border-stone-200/90 shadow-xs overflow-hidden">
+        <div className="p-4 sm:p-5 border-b border-stone-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="font-black text-base text-stone-900">
+              {showAllBranches ? 'Riwayat Aktivitas Terkini (Seluruh Cabang)' : `Riwayat Aktivitas Terkini ${branch.name}`}
+            </h3>
+            <p className="text-xs text-stone-500">Daftar rekap kasir, belanja harian purchase, dan order restok</p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            {/* Filter pills */}
+            <div className="flex items-center space-x-1 bg-stone-100 p-1 rounded-lg">
+              <button
+                onClick={() => setFilterType('all')}
+                className={`px-2.5 py-1 rounded-md font-semibold transition cursor-pointer ${
+                  filterType === 'all' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-600 hover:text-stone-900'
+                }`}
+              >
+                Semua
+              </button>
+              <button
+                onClick={() => setFilterType('shift')}
+                className={`px-2.5 py-1 rounded-md font-semibold transition cursor-pointer ${
+                  filterType === 'shift' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-600 hover:text-stone-900'
+                }`}
+              >
+                Kasir
+              </button>
+              <button
+                onClick={() => setFilterType('expense')}
+                className={`px-2.5 py-1 rounded-md font-semibold transition cursor-pointer ${
+                  filterType === 'expense' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-600 hover:text-stone-900'
+                }`}
+              >
+                Belanja
+              </button>
+              <button
+                onClick={() => setFilterType('order')}
+                className={`px-2.5 py-1 rounded-md font-semibold transition cursor-pointer ${
+                  filterType === 'order' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-600 hover:text-stone-900'
+                }`}
+              >
+                Order
+              </button>
+            </div>
+
+            <button
+              onClick={() => onOpenHtmlModal()}
+              className="px-2.5 py-1 rounded-lg bg-stone-50 hover:bg-stone-100 border border-stone-200 text-stone-700 font-semibold cursor-pointer"
+              title="Download Bundle HTML"
+            >
+              Kode HTML
+            </button>
+            <button
+              onClick={() => onOpenRulesModal()}
+              className="px-2.5 py-1 rounded-lg bg-stone-50 hover:bg-stone-100 border border-stone-200 text-stone-700 font-semibold cursor-pointer"
+              title="Firebase Security Rules"
+            >
+              Security Rules
+            </button>
+          </div>
+        </div>
+
+        {/* Table Body */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="bg-stone-50/80 text-stone-500 font-semibold border-b border-stone-100">
+                <th className="py-3 px-4">Tanggal</th>
+                <th className="py-3 px-3">Cabang</th>
+                <th className="py-3 px-3">Aktivitas Operasional</th>
+                <th className="py-3 px-3 text-right">Nominal (Rupiah)</th>
+                <th className="py-3 px-3">PIC / Petugas</th>
+                <th className="py-3 px-4 text-center">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-stone-100 text-stone-700">
+              {filteredActivities.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-stone-400">
+                    Belum ada riwayat aktivitas yang sesuai filter.
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-stone-100 text-stone-700">
-                {recentTransactions.map((tx) => {
-                  const isChecked = selectedTransactions.includes(tx.id);
+              ) : (
+                filteredActivities.slice(0, 15).map((act) => {
+                  let branchBadge = 'bg-amber-50 text-amber-800 border-amber-200';
+                  if (act.branchId === 'urip') {
+                    branchBadge = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+                  } else if (act.branchId === 'madiun') {
+                    branchBadge = 'bg-blue-50 text-blue-800 border-blue-200';
+                  }
+
                   return (
-                    <tr
-                      key={tx.id}
-                      className={`hover:bg-stone-50/60 transition-colors ${
-                        isChecked ? 'bg-stone-50/40' : ''
-                      }`}
-                    >
-                      <td className="py-3.5 px-4 text-center">
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => toggleSelectTx(tx.id)}
-                          className="rounded border-stone-300 text-stone-900 focus:ring-stone-900 cursor-pointer"
-                        />
+                    <tr key={act.id} className="hover:bg-stone-50/70 transition-colors">
+                      <td className="py-3.5 px-4 font-mono text-stone-500 whitespace-nowrap">
+                        {act.date}
                       </td>
-                      <td className="py-3.5 px-3 font-semibold text-stone-900">
-                        <div className="flex items-center space-x-2.5">
-                          <span
-                            className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 ${tx.iconColor}`}
-                          >
-                            <Box className="w-3.5 h-3.5" />
-                          </span>
-                          <span>{tx.activity}</span>
-                        </div>
+                      <td className="py-3.5 px-3">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${branchBadge}`}>
+                          {act.branchName}
+                        </span>
                       </td>
-                      <td className="py-3.5 px-3 font-mono font-bold text-stone-900">
-                        {tx.price}
+                      <td className="py-3.5 px-3">
+                        <div className="font-bold text-stone-900">{act.title}</div>
+                        <div className="text-[11px] text-stone-400 mt-0.5">{act.note}</div>
                       </td>
-                      <td className="py-3.5 px-3 text-stone-500">
-                        <div className="font-semibold text-stone-800">{tx.date}</div>
-                        <div className="text-[10px] text-stone-400 font-mono">{tx.time}</div>
+                      <td className="py-3.5 px-3 text-right font-mono font-bold text-stone-900 whitespace-nowrap">
+                        {act.nominalFormatted}
                       </td>
-                      <td className="py-3.5 px-3 text-stone-500 max-w-[150px] truncate">
-                        {tx.note}
+                      <td className="py-3.5 px-3 text-stone-600">
+                        <span className="font-semibold">{act.pic}</span>
                       </td>
-                      <td className="py-3.5 px-4 text-center">
-                        <span
-                          className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${tx.statusColor}`}
-                        >
-                          {tx.status}
+                      <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                        <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${act.statusColor}`}>
+                          {act.status}
                         </span>
                       </td>
                     </tr>
                   );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Right Column: Your Balance Card & Peach Investment Card (4 cols) */}
-        <div className="lg:col-span-4 space-y-4">
-          {/* Card 1: Your Balance Dark Card with geometric watermark & actions */}
-          <div className="bg-[#1c1d22] text-white rounded-2xl p-5 shadow-lg relative overflow-hidden flex flex-col justify-between">
-            {/* Geometric watermark in top right */}
-            <div className="absolute top-2 right-2 opacity-10 pointer-events-none">
-              <svg width="110" height="110" viewBox="0 0 100 100" fill="none">
-                <circle cx="50" cy="50" r="45" stroke="white" strokeWidth="6" strokeDasharray="8 8" />
-                <rect x="25" y="25" width="50" height="50" stroke="white" strokeWidth="4" />
-                <circle cx="50" cy="50" r="20" stroke="white" strokeWidth="3" />
-              </svg>
-            </div>
-
-            <div className="relative z-10">
-              <span className="text-xs text-stone-400 font-medium tracking-wide">Your Balance</span>
-              <h2 className="text-2xl sm:text-3xl font-black text-white font-mono mt-1 tracking-tight">
-                {currencyMode === 'USD' ? '70,147.41 USD' : formatRupiah(70147410)}
-              </h2>
-            </div>
-
-            {/* 3 Translucent Pill Quick Action Buttons */}
-            <div className="mt-6 grid grid-cols-3 gap-2.5 relative z-10">
-              {/* Deposit -> Kasir */}
-              <button
-                onClick={onOpenKasirModal}
-                disabled={!canInputKasir}
-                className="py-3 px-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 backdrop-blur-xs flex flex-col items-center justify-center space-y-1 transition cursor-pointer text-stone-200 hover:text-white"
-                title="Input Kasir (Setor Kasir)"
-              >
-                <div className="w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center">
-                  <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-400" />
-                </div>
-                <span className="text-[11px] font-semibold">Deposit</span>
-              </button>
-
-              {/* Withdraw -> Belanja */}
-              <button
-                onClick={onOpenBelanjaModal}
-                disabled={!canInputBelanja}
-                className="py-3 px-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 backdrop-blur-xs flex flex-col items-center justify-center space-y-1 transition cursor-pointer text-stone-200 hover:text-white"
-                title="Input Belanja (Tarik Belanja)"
-              >
-                <div className="w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center">
-                  <ArrowUpRight className="w-3.5 h-3.5 text-amber-400" />
-                </div>
-                <span className="text-[11px] font-semibold">Withdraw</span>
-              </button>
-
-              {/* Transfer -> Order Restok (Special glowing pink pill) */}
-              <button
-                onClick={onOpenOrderModal}
-                disabled={!canInputOrder}
-                className="py-3 px-2 rounded-xl bg-gradient-to-br from-pink-500/30 to-rose-600/30 hover:from-pink-500/40 hover:to-rose-600/40 border border-pink-400/40 backdrop-blur-xs flex flex-col items-center justify-center space-y-1 transition cursor-pointer text-white"
-                title="Order Restok (Transfer ke Holding)"
-              >
-                <div className="w-6 h-6 rounded-lg bg-pink-500/40 flex items-center justify-center">
-                  <Send className="w-3.5 h-3.5 text-pink-200" />
-                </div>
-                <span className="text-[11px] font-bold">Transfer</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Card 2: Soft Peach Card: You Invest $1226.3 in Last 30 Days */}
-          <div className="rounded-2xl p-4.5 bg-gradient-to-r from-[#ffe4e6] to-[#fef3c7] border border-rose-200/50 shadow-2xs text-center flex flex-col items-center justify-center">
-            <p className="text-xs text-stone-700">
-              You Invest{' '}
-              <span className="text-sm font-black text-stone-900 font-mono">
-                {currencyMode === 'USD' ? '$1226.3' : formatRupiah(1226300)}
-              </span>{' '}
-              in
-            </p>
-            <p className="text-xs font-bold text-stone-800 mt-0.5">Last 30 Days</p>
-            <p className="text-[10px] text-stone-500 mt-1">
-              Akumulasi belanja operasional &amp; pengadaan bahan baku {branch.shortName}
-            </p>
-          </div>
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

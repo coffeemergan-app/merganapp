@@ -928,10 +928,14 @@ export const App: React.FC = () => {
               onOpenOrderModal={() => setShowOrderModal(true)}
               onOpenHtmlModal={() => setShowHtmlModal(true)}
               onOpenRulesModal={() => setShowRulesModal(true)}
+              onOpenUserManagementModal={() => setShowUserManagementModal(true)}
+              onOpenPermissionsModal={() => setShowPermissionsModal(true)}
               onNavigateTab={(tab) => setActiveTab(tab)}
               canInputKasir={canInputKasir}
               canInputBelanja={canInputBelanja}
               canInputOrder={canInputOrder}
+              canConfirmOrder={canConfirmOrder}
+              canEditMaster={canEditMaster}
             />
           ) : (
             <div className="space-y-6">

@@ -29,7 +29,7 @@ export const DashboardStats: React.FC<DashboardStatsProps> = ({
         <div className="flex items-center justify-between mb-1.5">
           <span className="text-xs font-semibold text-stone-500">Total Omzet Kasir</span>
           <div className="p-1.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-200">
-            <DollarSign className="w-4 h-4" />
+            <Banknote className="w-4 h-4" />
           </div>
         </div>
         <div className="text-xl font-black text-stone-900 tracking-tight font-mono">{formatRupiah(totalOmzet)}</div>
